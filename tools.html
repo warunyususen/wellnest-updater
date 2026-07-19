@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WellNest+ · อ่านข้อมูลเครื่อง</title>
+<!-- UART.js: ไลบรารีทางการของ Espruino สำหรับเชื่อม Bangle.js ผ่าน Web Bluetooth (reuse ชุดเดียวกับ index.html) -->
+<script src="https://www.espruino.com/js/uart.js"></script>
+<style>
+  /* ---------- Design tokens (WellNest+) — คัดลอกให้ตรงกับ index.html เป๊ะ ---------- */
+  :root{
+    --ink:#14181f;         /* ตัวอักษรหลัก */
+    --muted:#6b7480;       /* ตัวอักษรรอง */
+    --line:#dfe6ee;        /* เส้นคั่น */
+    --bg:#f5f8fc;          /* พื้นหลัง (ฟ้าอ่อน) */
+    --panel:#ffffff;
+    --yellow:#f2c21e;      /* เหลืองแบรนด์ */
+    --blue:#1b62a6;        /* น้ำเงินแบรนด์ */
+    --blue-ink:#0f3d6b;
+    --ok:#1a7f4b;
+    --warn:#b23b2e;
+    --radius:14px;
+    /* เพิ่มเฉพาะหน้านี้: ฟอนต์ monospace สำหรับค่าที่เป็นตัวเลข/รหัส (version, MAC) */
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans Thai",sans-serif;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    display:flex;justify-content:center;
+    padding:28px 18px 60px;
+  }
+  .wrap{width:100%;max-width:440px}
+
+  /* ---------- Header ---------- */
+  .eyebrow{
+    font-size:12px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--blue);font-weight:700;margin:0 0 6px;
+  }
+  h1{font-size:26px;line-height:1.2;margin:0 0 4px;letter-spacing:-.01em}
+  .sub{color:var(--muted);font-size:14px;margin:0 0 16px}
+
+  /* ---------- ป้าย READ-ONLY (signature ของหน้านี้: สื่อว่าปลอดภัย) ---------- */
+  .ro-badge{
+    display:inline-flex;align-items:center;gap:8px;
+    background:#e9f5ee;color:var(--ok);border:1px solid #bfe3cd;
+    font-size:12.5px;font-weight:700;letter-spacing:.02em;
+    padding:8px 12px;border-radius:999px;margin-bottom:22px;
+  }
+  .ro-badge .lock{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:0 0 8px}
+
+  /* ---------- ปุ่ม (reuse จาก index.html) ---------- */
+  .steps{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px;margin-bottom:16px;
+  }
+  .step{display:flex;gap:12px;align-items:flex-start;padding:10px 0}
+  .step + .step{border-top:1px solid var(--line)}
+  .num{
+    flex:0 0 26px;height:26px;border-radius:50%;background:var(--blue);color:#fff;
+    font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:2px;
+  }
+  .step-body{flex:1}
+  .step-body .label{font-weight:600;margin:0 0 8px;font-size:15px}
+
+  button{
+    font:inherit;font-weight:600;cursor:pointer;border-radius:10px;border:1px solid transparent;
+    padding:12px 16px;width:100%;transition:transform .05s ease, background .15s ease, opacity .15s;
+  }
+  button:active{transform:translateY(1px)}
+  button:focus-visible{outline:3px solid #9ec3ea;outline-offset:2px}
+  .btn-primary{background:var(--blue);color:#fff}
+  .btn-primary:hover{background:var(--blue-ink)}
+  .btn-accent{background:var(--yellow);color:#3a2e00}
+  .btn-accent:hover{background:#e0b012}
+  .btn-ghost{background:#fff;color:var(--blue);border-color:var(--line)}
+  .btn-ghost:hover{background:#f2f7fd}
+  button:disabled{opacity:.45;cursor:not-allowed}
+
+  /* ---------- Status (reuse จาก index.html) ---------- */
+  .status{
+    display:flex;align-items:center;gap:9px;font-size:14px;color:var(--muted);
+    padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:16px;
+    min-height:46px;
+  }
+  .dot{width:9px;height:9px;border-radius:50%;background:#c3ccd6;flex:0 0 9px}
+  .status.ok .dot{background:var(--ok)} .status.ok{color:var(--ok)}
+  .status.err .dot{background:var(--warn)} .status.err{color:var(--warn)}
+  .status.busy .dot{background:var(--yellow)}
+
+  /* ---------- การ์ดผลลัพธ์ (เฉพาะหน้านี้) ---------- */
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:6px 18px;margin-bottom:16px;
+  }
+  .card.empty{color:var(--muted);font-size:14px;padding:18px;text-align:center}
+  .row{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:13px 0}
+  .row + .row{border-top:1px solid var(--line)}
+  .row .k{color:var(--muted);font-size:13.5px;flex:0 0 auto}
+  .row .v{font-weight:600;font-size:15px;text-align:right;word-break:break-all}
+  .row .v.mono{font-family:var(--mono);font-weight:600;font-size:14px}
+  .row .v .unit{color:var(--muted);font-weight:400;font-size:12.5px;margin-left:3px}
+  .row .v.na{color:var(--muted);font-weight:400}
+
+  .note{font-size:12.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:14px}
+  .note b{color:var(--ink)}
+  code{background:#eef3f8;padding:1px 5px;border-radius:5px;font-size:12px}
+
+  @media (prefers-reduced-motion:reduce){button{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="eyebrow">WellNest+ · เครื่องมือช่าง</p>
+  <h1>อ่านข้อมูลเครื่อง</h1>
+  <p class="sub">ตรวจสถานะพื้นฐานของสายรัด — เฟิร์มแวร์ · แบตเตอรี่ · พื้นที่เก็บข้อมูล · MAC สำหรับลงทะเบียนเครื่อง</p>
+
+  <!-- signature: ป้ายบอกชัดว่าหน้านี้อ่านอย่างเดียว -->
+  <span class="ro-badge"><span class="lock"></span>อ่านอย่างเดียว · ไม่เขียน ไม่ลบข้อมูลบนสายรัด</span>
+
+  <!-- ลำดับการใช้งาน: เชื่อมต่อ → อ่านข้อมูล -->
+  <div class="steps">
+    <div class="step">
+      <div class="num">1</div>
+      <div class="step-body">
+        <p class="label">เชื่อมต่อสายรัด</p>
+        <button class="btn-primary" id="btnConnect">เชื่อมต่อสายรัด</button>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">2</div>
+      <div class="step-body">
+        <p class="label">อ่านข้อมูลเครื่อง</p>
+        <button class="btn-accent" id="btnRead" disabled>อ่านข้อมูลเครื่อง</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="status" id="status"><span class="dot"></span><span id="statusText">ยังไม่ได้เชื่อมต่อ</span></div>
+
+  <!-- ผลลัพธ์: เริ่มเป็นสถานะว่าง -->
+  <div class="card empty" id="info">ยังไม่มีข้อมูล — กด “อ่านข้อมูลเครื่อง” เพื่อดึงสถานะจากสายรัด</div>
+
+  <button class="btn-ghost" id="btnBack" style="margin-bottom:16px">ไปหน้าอัปเดตแบรนด์ (WellNest+ Updater)</button>
+
+  <p class="note">
+    <b>ต้องใช้:</b> เปิด Bluetooth + Google Chrome / Edge (Mac, Windows, Android)
+    · <b>ใช้ไม่ได้บน iPhone/iPad</b> (Safari และ Chrome บน iOS ไม่รองรับ Web Bluetooth)
+    · หน้านี้ต้องเปิดผ่าน <code>https://</code> หรือ <code>localhost</code>
+  </p>
+
+</div>
+
+<script>
+  // ============================================================
+  // WellNest+ — Device Info (READ-ONLY)
+  // แยกไฟล์จาก index.html โดยตั้งใจ: index.html มีคำสั่ง "เขียน"
+  // ส่วนไฟล์นี้ "อ่านอย่างเดียว" 100% เพื่อความปลอดภัย (least-privilege)
+  // ============================================================
+
+  var $ = function(id){ return document.getElementById(id); };
+
+  // ---------- helper: ป้องกัน XSS ก่อน render ค่าจากเครื่องด้วย innerHTML ----------
+  // ค่าจากสายรัดควรเป็นตัวเลข/รหัสอยู่แล้ว แต่ sanitize ไว้เป็น defense-in-depth
+  function sanitizeHTML(v){
+    return String(v == null ? "" : v)
+      .replace(/&/g,"&amp;")
+      .replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;")
+      .replace(/"/g,"&quot;")
+      .replace(/'/g,"&#39;");
+  }
+
+  // ---------- helper: อัปเดตแถบสถานะ (reuse pattern จาก index.html) ----------
+  function setStatus(text, kind){
+    var s = $("status");
+    s.className = "status" + (kind ? " " + kind : "");
+    $("statusText").textContent = text;
+  }
+
+  // ---------- helper: แปลง bytes เป็นหน่วยอ่านง่าย ----------
+  function fmtBytes(n){
+    if(typeof n !== "number" || isNaN(n)) return null;
+    if(n >= 1048576) return (n/1048576).toFixed(2) + " MB";
+    if(n >= 1024)    return (n/1024).toFixed(1) + " KB";
+    return n + " B";
+  }
+
+  // ---------- helper: สร้าง 1 แถวของการ์ด (ค่าที่เป็น null จะแสดง “—”) ----------
+  function row(label, value, opt){
+    opt = opt || {};
+    var cls = "v" + (opt.mono ? " mono" : "");
+    var html;
+    if(value == null || value === ""){
+      html = '<span class="v na">—</span>';
+    }else{
+      var unit = opt.unit ? '<span class="unit">' + sanitizeHTML(opt.unit) + '</span>' : "";
+      html = '<span class="' + cls + '">' + sanitizeHTML(value) + unit + '</span>';
+    }
+    return '<div class="row"><span class="k">' + sanitizeHTML(label) + '</span>' + html + '</div>';
+  }
+
+  // ---------- render ผลลัพธ์ลงการ์ด ----------
+  function renderInfo(d){
+    d = d || {};
+    var battTxt = (typeof d.batt === "number")
+      ? d.batt + "%" + (d.charging ? " · กำลังชาร์จ" : "")
+      : null;
+
+    var freeTxt = fmtBytes(d.free);
+    var filesTxt = (typeof d.files === "number") ? (d.files + " ไฟล์") : null;
+    var storageTxt = (freeTxt && filesTxt) ? (freeTxt + " ว่าง · " + filesTxt)
+                    : (freeTxt || filesTxt);
+
+    var ramTxt = (typeof d.ramFree === "number" && typeof d.ramTotal === "number")
+      ? (d.ramFree + " / " + d.ramTotal)
+      : null;
+
+    var html = "";
+    html += row("เฟิร์มแวร์ (firmware)", d.fw, {mono:true});
+    html += row("Git commit", d.commit, {mono:true});
+    html += row("บอร์ด (board)", d.board, {mono:true});
+    html += row("Bluetooth MAC", d.mac, {mono:true});
+    html += row("แบตเตอรี่", battTxt);
+    html += row("พื้นที่เก็บข้อมูล", storageTxt);
+    html += row("หน่วยความจำ (RAM blocks)", ramTxt, {mono:true});
+
+    var box = $("info");
+    box.className = "card";              // ปลดสถานะ empty
+    box.innerHTML = html;                // ค่าทุกตัวผ่าน sanitizeHTML() แล้วใน row()
+  }
+
+  // ============================================================
+  // ▼▼▼ โซน READ-ONLY — ห้ามเพิ่มคำสั่ง write / erase / save / load ใต้บรรทัดนี้ ▼▼▼
+  // ใช้ได้เฉพาะ UART.eval() เพื่ออ่านค่ากลับมาเท่านั้น
+  // ถ้าต้องการฟังก์ชัน "เขียน" ให้ไปทำในไฟล์แยก (เช่น index.html) — ไม่ใช่ไฟล์นี้
+  // ============================================================
+
+  // expression ที่ประเมินบน "ฝั่งสายรัด" แล้วส่งผลลัพธ์ (JSON) กลับมา
+  // อ่านล้วน: process.env / NRF.getAddress / E.getBattery / Bangle.isCharging /
+  //           Storage.list().length / Storage.getFree() / process.memory()
+  // ห่อ try/catch ทีละค่าไว้บนเครื่อง เผื่อบางบิลด์ไม่มี API นั้น จะได้ไม่พังทั้งก้อน
+  var READ_EXPR =
+    "(function(){var r={};" +
+    "try{r.fw=process.env.VERSION}catch(e){}" +
+    "try{r.commit=process.env.GIT_COMMIT}catch(e){}" +
+    "try{r.board=process.env.BOARD}catch(e){}" +
+    "try{r.mac=NRF.getAddress()}catch(e){}" +
+    "try{r.batt=E.getBattery()}catch(e){}" +
+    "try{r.charging=Bangle.isCharging()}catch(e){}" +
+    "try{var s=require('Storage');r.files=s.list().length;r.free=s.getFree()}catch(e){}" +
+    "try{var m=process.memory();r.ramFree=m.free;r.ramTotal=m.total}catch(e){}" +
+    "return r;})()";
+
+  // อ่านค่าจริง (อ่านอย่างเดียว — ไม่มี UART.write ที่เปลี่ยนสถานะเครื่อง)
+  function doRead(){
+    setStatus("กำลังอ่านข้อมูลจากสายรัด…", "busy");
+    UART.eval(READ_EXPR, function(data){
+      if(data == null || typeof data !== "object"){
+        setStatus("อ่านข้อมูลไม่สำเร็จ — ลองกดอีกครั้ง", "err");
+        return;
+      }
+      renderInfo(data);
+      setStatus("อ่านข้อมูลสำเร็จ ✓", "ok");
+    });
+  }
+
+  // ============================================================
+  // ▲▲▲ จบโซน READ-ONLY ▲▲▲
+  // ============================================================
+
+  // ---------- ผูก event เมื่อเชื่อมต่อสำเร็จ ----------
+  function onConnected(connection){
+    setStatus("เชื่อมต่อสายรัดแล้ว พร้อมอ่านข้อมูล", "ok");
+    $("btnRead").disabled = false;
+    connection.on("close", function(){
+      setStatus("การเชื่อมต่อหลุด — กด “เชื่อมต่อสายรัด” อีกครั้ง", "err");
+      $("btnRead").disabled = true;
+    });
+  }
+
+  // ---------- ตรวจว่าเบราว์เซอร์รองรับ Web Bluetooth ไหม ----------
+  if(!navigator.bluetooth){
+    setStatus("เบราว์เซอร์นี้ไม่รองรับ Web Bluetooth — โปรดใช้ Chrome/Edge บน Mac, Windows หรือ Android", "err");
+    $("btnConnect").disabled = true;
+  }
+
+  // ---------- ปุ่ม 1: เชื่อมต่อ ----------
+  $("btnConnect").addEventListener("click", function(){
+    setStatus("กำลังเชื่อมต่อ… เลือกสายรัด Bangle.js ในหน้าต่างที่ขึ้นมา", "busy");
+    UART.connect(function(connection){
+      if(!connection){
+        setStatus("เชื่อมต่อไม่สำเร็จ — ลองใหม่ และตรวจว่าเปิด Bluetooth แล้ว", "err");
+        return;
+      }
+      onConnected(connection);
+    });
+  });
+
+  // ---------- ปุ่ม 2: อ่านข้อมูล (auto-connect ถ้ายังไม่ได้ต่อ) ----------
+  $("btnRead").addEventListener("click", function(){
+    var c = UART.getConnection();
+    if(c){
+      doRead();
+    }else{
+      setStatus("กำลังเชื่อมต่อ…", "busy");
+      UART.connect(function(cc){
+        if(cc){ onConnected(cc); doRead(); }
+        else{ setStatus("เชื่อมต่อไม่สำเร็จ — ลองใหม่", "err"); }
+      });
+    }
+  });
+
+  // ---------- ปุ่มลิงก์กลับไปหน้าอัปเดตแบรนด์ ----------
+  $("btnBack").addEventListener("click", function(){
+    window.location.href = "index.html";
+  });
+</script>
+</body>
+</html>
