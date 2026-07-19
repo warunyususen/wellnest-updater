@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WellNest+ Updater</title>
+<!-- UART.js: ไลบรารีทางการของ Espruino สำหรับเชื่อม Bangle.js ผ่าน Web Bluetooth -->
+<script src="https://www.espruino.com/js/uart.js"></script>
+<style>
+  /* ---------- Design tokens (WellNest+) ---------- */
+  :root{
+    --ink:#14181f;         /* ตัวอักษรหลัก */
+    --muted:#6b7480;       /* ตัวอักษรรอง */
+    --line:#dfe6ee;        /* เส้นคั่น */
+    --bg:#f5f8fc;          /* พื้นหลัง (ฟ้าอ่อน ไม่ใช่ครีม) */
+    --panel:#ffffff;
+    --yellow:#f2c21e;      /* เหลืองแบรนด์ */
+    --blue:#1b62a6;        /* น้ำเงินแบรนด์ */
+    --blue-ink:#0f3d6b;
+    --ok:#1a7f4b;
+    --warn:#b23b2e;
+    --radius:14px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans Thai",sans-serif;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    display:flex;justify-content:center;
+    padding:28px 18px 60px;
+  }
+  .wrap{width:100%;max-width:440px}
+
+  /* ---------- Header ---------- */
+  .eyebrow{
+    font-size:12px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--blue);font-weight:700;margin:0 0 6px;
+  }
+  h1{font-size:26px;line-height:1.2;margin:0 0 4px;letter-spacing:-.01em}
+  .sub{color:var(--muted);font-size:14px;margin:0 0 22px}
+
+  /* ---------- Watch preview (signature) ---------- */
+  .stage{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:22px;display:flex;flex-direction:column;align-items:center;gap:14px;
+    margin-bottom:18px;
+  }
+  .watch{
+    width:200px;height:200px;border-radius:34px;background:#000;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    box-shadow:0 10px 26px rgba(15,61,107,.18), inset 0 0 0 6px #22262e;
+    position:relative;overflow:hidden;user-select:none;
+  }
+  /* wordmark ซ้อน 2 บรรทัด echo โลโก้ */
+  .w-well{color:#ffe11a;font-weight:800;font-size:46px;line-height:.9;letter-spacing:-.01em}
+  .w-nest{color:#3f7bd6;font-weight:800;font-size:46px;line-height:.95;letter-spacing:-.01em}
+  .w-foot{color:#e9edf2;font-size:11px;letter-spacing:.06em;margin-top:12px}
+  .cap{font-size:12px;color:var(--muted);text-align:center;max-width:230px}
+
+  /* toggle */
+  .toggle{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--ink)}
+  .toggle input{width:18px;height:18px;accent-color:var(--blue)}
+
+  /* ---------- Steps ---------- */
+  .steps{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px;margin-bottom:16px;
+  }
+  .step{display:flex;gap:12px;align-items:flex-start;padding:10px 0}
+  .step + .step{border-top:1px solid var(--line)}
+  .num{
+    flex:0 0 26px;height:26px;border-radius:50%;background:var(--blue);color:#fff;
+    font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:2px;
+  }
+  .step-body{flex:1}
+  .step-body .label{font-weight:600;margin:0 0 8px;font-size:15px}
+
+  button{
+    font:inherit;font-weight:600;cursor:pointer;border-radius:10px;border:1px solid transparent;
+    padding:12px 16px;width:100%;transition:transform .05s ease, background .15s ease, opacity .15s;
+  }
+  button:active{transform:translateY(1px)}
+  button:focus-visible{outline:3px solid #9ec3ea;outline-offset:2px}
+  .btn-primary{background:var(--blue);color:#fff}
+  .btn-primary:hover{background:var(--blue-ink)}
+  .btn-accent{background:var(--yellow);color:#3a2e00}
+  .btn-accent:hover{background:#e0b012}
+  .btn-ghost{background:#fff;color:var(--blue);border-color:var(--line)}
+  .btn-ghost:hover{background:#f2f7fd}
+  button:disabled{opacity:.45;cursor:not-allowed}
+
+  /* ---------- Status ---------- */
+  .status{
+    display:flex;align-items:center;gap:9px;font-size:14px;color:var(--muted);
+    padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:16px;
+    min-height:46px;
+  }
+  .dot{width:9px;height:9px;border-radius:50%;background:#c3ccd6;flex:0 0 9px}
+  .status.ok .dot{background:var(--ok)} .status.ok{color:var(--ok)}
+  .status.err .dot{background:var(--warn)} .status.err{color:var(--warn)}
+  .status.busy .dot{background:var(--yellow)}
+
+  .note{font-size:12.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:14px}
+  .note b{color:var(--ink)}
+  code{background:#eef3f8;padding:1px 5px;border-radius:5px;font-size:12px}
+
+  @media (prefers-reduced-motion:reduce){button{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="eyebrow">WellNest+ · Device Updater</p>
+  <h1>อัปเดตสายรัด WellNest+</h1>
+  <p class="sub">เชื่อมต่อสายรัดข้อมือแล้วให้หน้าจอแสดงแบรนด์ WellNest+ — ใช้ผ่าน Google Chrome / Edge บน Mac, Windows หรือ Android</p>
+
+  <!-- Signature: ตัวอย่างหน้าจอสายรัด 176x176 -->
+  <div class="stage">
+    <div class="watch" id="preview" aria-label="ตัวอย่างหน้าจอสายรัด">
+      <div class="w-well">Well</div>
+      <div class="w-nest" id="pvNest">Nest+</div>
+      <div class="w-foot" id="pvFoot">WellNest+&nbsp;&nbsp;v0.1</div>
+    </div>
+    <label class="toggle">
+      <input type="checkbox" id="plus" checked>
+      แสดงเครื่องหมาย “+” ต่อท้าย
+    </label>
+    <p class="cap">นี่คือตัวอย่าง — จอจริงเป็นสี 3-bit อาจจัดจ้านกว่านี้เล็กน้อย</p>
+  </div>
+
+  <!-- Steps: เป็นลำดับจริง (เชื่อมต่อ → แสดง) จึงใช้เลขกำกับ -->
+  <div class="steps">
+    <div class="step">
+      <div class="num">1</div>
+      <div class="step-body">
+        <p class="label">เชื่อมต่อสายรัด</p>
+        <button class="btn-primary" id="btnConnect">เชื่อมต่อสายรัด</button>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">2</div>
+      <div class="step-body">
+        <p class="label">แสดง WellNest+ บนหน้าจอ</p>
+        <button class="btn-accent" id="btnShow" disabled>แสดง WellNest+ บนสายรัด</button>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">↺</div>
+      <div class="step-body">
+        <p class="label">กลับสู่หน้าปัดปกติ</p>
+        <button class="btn-ghost" id="btnReset" disabled>กลับหน้าปัดปกติ</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="status" id="status"><span class="dot"></span><span id="statusText">ยังไม่ได้เชื่อมต่อ</span></div>
+
+  <p class="note">
+    <b>ต้องใช้:</b> เปิด Bluetooth + ใช้ Google Chrome / Edge (Mac, Windows, Android)
+    · <b>ใช้ไม่ได้บน iPhone/iPad</b> (Safari และ Chrome บน iOS ไม่รองรับ Web Bluetooth)
+    · หน้านี้ต้องเปิดผ่าน <code>https://</code> หรือ <code>localhost</code>
+  </p>
+
+</div>
+
+<script>
+  // ---------- Config (แก้จุดเดียว: single source of truth) ----------
+  var VERSION = "v0.1";        // เวอร์ชันที่จะโชว์บนสายรัด
+  var BRAND_TOP = "Well";      // บรรทัดบน (เหลือง)
+  var BRAND_BOT = "Nest";      // บรรทัดล่าง (น้ำเงิน) — "+" ต่อท้ายควบคุมด้วย checkbox
+
+  var $ = function(id){ return document.getElementById(id); };
+  var plusEl = $("plus");
+
+  // ---------- อัปเดตตัวอย่าง (preview) แบบ live ----------
+  function refreshPreview(){
+    var plus = plusEl.checked ? "+" : "";
+    $("pvNest").textContent = BRAND_BOT + plus;
+    // footer ใช้ innerHTML เฉพาะ &nbsp; ที่เป็นค่าคงที่ (ไม่มี input จากผู้ใช้)
+    $("pvFoot").innerHTML = "WellNest" + plus + "&nbsp;&nbsp;" + VERSION;
+  }
+  plusEl.addEventListener("change", refreshPreview);
+  refreshPreview();
+
+  // ---------- สร้างโค้ดที่จะส่งเข้าสายรัด (payload บรรทัดเดียว = ปลอดภัยสุดกับ REPL) ----------
+  function buildPayload(){
+    var plus = plusEl.checked ? "+" : "";
+    var bot  = BRAND_BOT + plus;              // เช่น "Nest+"
+    var foot = "WellNest" + plus + "  " + VERSION;
+    // \x10 = สั่งไม่ให้ REPL echo กลับ, ปิดท้ายด้วย \n เพื่อให้ execute
+    return "\x10(function(){function d(){" +
+      "g.clear(1);g.setColor(0,0,0);g.fillRect(0,0,g.getWidth(),g.getHeight());" +
+      "g.setFontAlign(0,0);" +
+      "g.setColor(1,1,0);g.setFont('Vector',46);g.drawString('" + BRAND_TOP + "',g.getWidth()/2,60);" +
+      "g.setColor(0,0,1);g.drawString('" + bot + "',g.getWidth()/2,108);" +
+      "g.setColor(1,1,1);g.setFont('6x8',1);g.drawString('" + foot + "',g.getWidth()/2,164);" +
+      "Bangle.setLCDPower(1);}" +
+      "d();if(global.WN)clearInterval(global.WN);global.WN=setInterval(d,1500);" +
+      "setTimeout(function(){clearInterval(global.WN);global.WN=undefined;},15000);" +
+      "})()\n";
+  }
+
+  // ---------- helper: อัปเดตสถานะ ----------
+  function setStatus(text, kind){
+    var s = $("status");
+    s.className = "status" + (kind ? " " + kind : "");
+    $("statusText").textContent = text;
+  }
+
+  // ---------- ตรวจว่าเบราว์เซอร์รองรับ Web Bluetooth ไหม ----------
+  if(!navigator.bluetooth){
+    setStatus("เบราว์เซอร์นี้ไม่รองรับ Web Bluetooth — โปรดใช้ Chrome/Edge บน Mac, Windows หรือ Android", "err");
+    $("btnConnect").disabled = true;
+  }
+
+  // ---------- ปุ่ม 1: เชื่อมต่อ ----------
+  $("btnConnect").addEventListener("click", function(){
+    setStatus("กำลังเชื่อมต่อ… เลือกสายรัด Bangle.js ในหน้าต่างที่ขึ้นมา", "busy");
+    UART.connect(function(connection){
+      if(!connection){
+        setStatus("เชื่อมต่อไม่สำเร็จ — ลองใหม่ และตรวจว่าเปิด Bluetooth แล้ว", "err");
+        return;
+      }
+      setStatus("เชื่อมต่อสายรัดแล้ว พร้อมอัปเดต", "ok");
+      $("btnShow").disabled = false;
+      $("btnReset").disabled = false;
+      connection.on("close", function(){
+        setStatus("การเชื่อมต่อหลุด — กด “เชื่อมต่อสายรัด” อีกครั้ง", "err");
+        $("btnShow").disabled = true;
+        $("btnReset").disabled = true;
+      });
+    });
+  });
+
+  // ---------- ส่งโค้ดเข้าสายรัด (auto-connect ถ้ายังไม่ต่อ) ----------
+  function send(payload, okText){
+    var c = UART.getConnection();
+    if(c){
+      c.write(payload);
+      setStatus(okText, "ok");
+    }else{
+      setStatus("กำลังเชื่อมต่อ…", "busy");
+      UART.connect(function(cc){
+        if(cc){ cc.write(payload); setStatus(okText, "ok"); }
+        else{ setStatus("เชื่อมต่อไม่สำเร็จ — ลองใหม่", "err"); }
+      });
+    }
+  }
+
+  // ---------- ปุ่ม 2: แสดง WellNest+ ----------
+  $("btnShow").addEventListener("click", function(){
+    send(buildPayload(), "ส่งแล้ว — สายรัดกำลังแสดง WellNest+ ✓");
+  });
+
+  // ---------- ปุ่ม reset: กลับหน้าปัดปกติ ----------
+  $("btnReset").addEventListener("click", function(){
+    send("\x10load()\n", "กลับสู่หน้าปัดปกติแล้ว");
+  });
+</script>
+</body>
+</html>
