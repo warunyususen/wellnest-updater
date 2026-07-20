@@ -106,6 +106,31 @@
   .row .v .unit{color:var(--muted);font-weight:400;font-size:12.5px;margin-left:3px}
   .row .v.na{color:var(--muted);font-weight:400}
 
+  /* ---------- รายการไฟล์ + เครื่องมือเทียบ baseline (เฉพาะหน้านี้, read-only) ---------- */
+  .files-head{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:13px 0 12px}
+  .files-head .k{color:var(--muted);font-size:13.5px}
+  .files-head .cnt{font-weight:700;font-size:15px}
+  .filelist{
+    font-family:var(--mono);font-size:12.5px;line-height:1.65;
+    max-height:260px;overflow:auto;background:#f7fafd;border:1px solid var(--line);
+    border-radius:10px;padding:10px 12px;margin:0 0 12px;white-space:pre-wrap;word-break:break-all;
+  }
+  .filelist.empty-list{color:var(--muted);text-align:center;font-family:inherit}
+  .diff-box{border-top:1px solid var(--line);padding-top:14px;margin-bottom:6px}
+  .diff-box label{display:block;font-size:13px;color:var(--muted);margin-bottom:6px}
+  .diff-box textarea{
+    width:100%;min-height:70px;font-family:var(--mono);font-size:12.5px;
+    border:1px solid var(--line);border-radius:10px;padding:10px 12px;resize:vertical;
+    color:var(--ink);background:#fff;line-height:1.5;
+  }
+  .diff-box textarea:focus-visible{outline:3px solid #9ec3ea;outline-offset:1px}
+  .diff-result{font-size:13px;margin-top:12px;line-height:1.6}
+  .diff-result .grp{margin-bottom:8px}
+  .diff-result .grp b{color:var(--ink)}
+  .diff-result .fn{font-family:var(--mono);color:var(--warn);font-weight:700}
+  .diff-result .same{color:var(--ok);font-weight:600}
+  .diff-result .hint{color:var(--muted)}
+
   .note{font-size:12.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:14px}
   .note b{color:var(--ink)}
   code{background:#eef3f8;padding:1px 5px;border-radius:5px;font-size:12px}
@@ -139,12 +164,22 @@
         <button class="btn-accent" id="btnRead" disabled>อ่านข้อมูลเครื่อง</button>
       </div>
     </div>
+    <div class="step">
+      <div class="num">3</div>
+      <div class="step-body">
+        <p class="label">รายการไฟล์ (สำหรับเทียบ baseline ระหว่างเรือน)</p>
+        <button class="btn-ghost" id="btnFiles" disabled>อ่านรายการไฟล์</button>
+      </div>
+    </div>
   </div>
 
   <div class="status" id="status"><span class="dot"></span><span id="statusText">ยังไม่ได้เชื่อมต่อ</span></div>
 
   <!-- ผลลัพธ์: เริ่มเป็นสถานะว่าง -->
   <div class="card empty" id="info">ยังไม่มีข้อมูล — กด “อ่านข้อมูลเครื่อง” เพื่อดึงสถานะจากสายรัด</div>
+
+  <!-- รายการไฟล์: เริ่มเป็นสถานะว่าง (แสดงเมื่อกดปุ่ม step 3) -->
+  <div class="card empty" id="filesCard">ยังไม่มีรายการไฟล์ — กด “อ่านรายการไฟล์” เพื่อดึงรายชื่อไฟล์ในสายรัด (ใช้เทียบ 2 เรือน)</div>
 
   <button class="btn-ghost" id="btnBack" style="margin-bottom:16px">ไปหน้าอัปเดตแบรนด์ (WellNest+ Updater)</button>
 
@@ -235,6 +270,99 @@
     box.innerHTML = html;                // ค่าทุกตัวผ่าน sanitizeHTML() แล้วใน row()
   }
 
+  // ---------- render รายการไฟล์ + เครื่องมือเทียบ baseline ----------
+  var lastFiles = null;   // เก็บ list ล่าสุด (เรียงแล้ว) ไว้ให้ปุ่ม copy / diff ใช้ต่อ
+
+  function renderFiles(list){
+    // เรียงตัวอักษรเพื่อให้อ่าน/เทียบง่าย (ไม่แก้ข้อมูลบนเครื่อง — sort เฉพาะฝั่ง browser)
+    lastFiles = Array.isArray(list) ? list.slice().sort() : [];
+    var listHTML = lastFiles.length
+      ? lastFiles.map(function(f){ return sanitizeHTML(f); }).join("\n")
+      : "(ไม่มีไฟล์)";
+
+    var html =
+      '<div class="files-head"><span class="k">จำนวนไฟล์ทั้งหมด</span>' +
+        '<span class="cnt">' + lastFiles.length + ' ไฟล์</span></div>' +
+      '<div class="filelist' + (lastFiles.length ? '' : ' empty-list') + '" id="filelist">' + listHTML + '</div>' +
+      '<button class="btn-ghost" id="btnCopy" style="margin-bottom:12px">คัดลอกรายการ (ไว้เทียบอีกเรือน)</button>' +
+      '<div class="diff-box">' +
+        '<label for="diffInput">เทียบกับอีกเรือน — วางรายการไฟล์ที่คัดลอกไว้ที่นี่:</label>' +
+        '<textarea id="diffInput" placeholder="วางรายการไฟล์ของอีกเครื่อง แล้วกด “เทียบรายการ”"></textarea>' +
+        '<button class="btn-ghost" id="btnDiff" style="margin-top:10px">เทียบรายการ (diff)</button>' +
+        '<div class="diff-result" id="diffResult"></div>' +
+      '</div>';
+
+    var box = $("filesCard");
+    box.className = "card";              // ปลดสถานะ empty
+    box.innerHTML = html;               // ชื่อไฟล์ทุกตัวผ่าน sanitizeHTML() แล้ว
+    // innerHTML เพิ่งถูกเขียนใหม่ → ต้อง bind event ปุ่มที่เพิ่งสร้างใหม่ทุกครั้ง
+    $("btnCopy").addEventListener("click", copyFiles);
+    $("btnDiff").addEventListener("click", runDiff);
+  }
+
+  // ---------- คัดลอกรายการไฟล์ (ไว้ไปวางเทียบกับอีกเรือน) ----------
+  function copyFiles(){
+    if(!lastFiles) return;
+    var text = lastFiles.join("\n");
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      navigator.clipboard.writeText(text).then(function(){
+        setStatus("คัดลอกรายการไฟล์แล้ว — เปิดอีกเรือนแล้ววางในช่องเทียบ", "ok");
+      }, function(){ fallbackSelect(); });
+    }else{
+      fallbackSelect();
+    }
+  }
+  // สำรอง: ถ้า clipboard API ใช้ไม่ได้ ให้เลือกข้อความในกล่องให้ผู้ใช้ Cmd/Ctrl+C เอง
+  function fallbackSelect(){
+    var el = $("filelist");
+    if(el){
+      var range = document.createRange();
+      range.selectNodeContents(el);
+      var sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+    setStatus("กด Cmd/Ctrl+C เพื่อคัดลอกรายการที่เลือกไว้", "busy");
+  }
+
+  // ---------- แยกข้อความรายการไฟล์ที่วางมาเป็น array (รับได้ทั้งขึ้นบรรทัด/ช่องว่าง/จุลภาค) ----------
+  function parseList(text){
+    return String(text || "")
+      .split(/[\s,]+/)
+      .map(function(s){ return s.trim(); })
+      .filter(function(s){ return s.length > 0; });
+  }
+
+  // ---------- เทียบรายการไฟล์เครื่องนี้ vs รายการที่วางมา (ทำฝั่ง browser ล้วน ไม่ยุ่งกับเครื่อง) ----------
+  function runDiff(){
+    if(!lastFiles) return;
+    var res = $("diffResult");
+    var other = parseList($("diffInput").value);
+    if(other.length === 0){
+      res.innerHTML = '<span class="hint">วางรายการไฟล์ของอีกเครื่องก่อน แล้วกด “เทียบรายการ”</span>';
+      return;
+    }
+    var setThis = {}, setOther = {};
+    lastFiles.forEach(function(f){ setThis[f] = 1; });
+    other.forEach(function(f){ setOther[f] = 1; });
+    var onlyThis  = lastFiles.filter(function(f){ return !setOther[f]; });
+    var onlyOther = other.filter(function(f){ return !setThis[f]; });
+
+    var html;
+    if(onlyThis.length === 0 && onlyOther.length === 0){
+      html = '<span class="same">✓ รายการไฟล์ตรงกันทั้งหมด (' + lastFiles.length + ' ไฟล์)</span>';
+    }else{
+      var fmt = function(arr){
+        return arr.length
+          ? arr.map(function(f){ return '<span class="fn">' + sanitizeHTML(f) + '</span>'; }).join(", ")
+          : "—";
+      };
+      html  = '<div class="grp"><b>เฉพาะเครื่องนี้ (' + onlyThis.length + '):</b> ' + fmt(onlyThis) + '</div>';
+      html += '<div class="grp"><b>เฉพาะอีกเครื่อง (' + onlyOther.length + '):</b> ' + fmt(onlyOther) + '</div>';
+    }
+    res.innerHTML = html;
+  }
+
   // ============================================================
   // ▼▼▼ โซน READ-ONLY — ห้ามเพิ่มคำสั่ง write / erase / save / load ใต้บรรทัดนี้ ▼▼▼
   // ใช้ได้เฉพาะ UART.eval() เพื่ออ่านค่ากลับมาเท่านั้น
@@ -270,6 +398,22 @@
     });
   }
 
+  // อ่านรายชื่อไฟล์ทั้งหมดใน Storage (อ่านล้วน — list() ไม่แก้ไข/ลบข้อมูล)
+  var READ_FILES_EXPR =
+    "(function(){try{return require('Storage').list()}catch(e){return null}})()";
+
+  function doReadFiles(){
+    setStatus("กำลังอ่านรายการไฟล์จากสายรัด…", "busy");
+    UART.eval(READ_FILES_EXPR, function(data){
+      if(!Array.isArray(data)){
+        setStatus("อ่านรายการไฟล์ไม่สำเร็จ — ลองกดอีกครั้ง", "err");
+        return;
+      }
+      renderFiles(data);
+      setStatus("อ่านรายการไฟล์สำเร็จ ✓ (" + data.length + " ไฟล์)", "ok");
+    });
+  }
+
   // ============================================================
   // ▲▲▲ จบโซน READ-ONLY ▲▲▲
   // ============================================================
@@ -278,9 +422,11 @@
   function onConnected(connection){
     setStatus("เชื่อมต่อสายรัดแล้ว พร้อมอ่านข้อมูล", "ok");
     $("btnRead").disabled = false;
+    $("btnFiles").disabled = false;
     connection.on("close", function(){
       setStatus("การเชื่อมต่อหลุด — กด “เชื่อมต่อสายรัด” อีกครั้ง", "err");
       $("btnRead").disabled = true;
+      $("btnFiles").disabled = true;
     });
   }
 
@@ -311,6 +457,20 @@
       setStatus("กำลังเชื่อมต่อ…", "busy");
       UART.connect(function(cc){
         if(cc){ onConnected(cc); doRead(); }
+        else{ setStatus("เชื่อมต่อไม่สำเร็จ — ลองใหม่", "err"); }
+      });
+    }
+  });
+
+  // ---------- ปุ่ม 3: อ่านรายการไฟล์ (auto-connect ถ้ายังไม่ได้ต่อ) ----------
+  $("btnFiles").addEventListener("click", function(){
+    var c = UART.getConnection();
+    if(c){
+      doReadFiles();
+    }else{
+      setStatus("กำลังเชื่อมต่อ…", "busy");
+      UART.connect(function(cc){
+        if(cc){ onConnected(cc); doReadFiles(); }
         else{ setStatus("เชื่อมต่อไม่สำเร็จ — ลองใหม่", "err"); }
       });
     }
