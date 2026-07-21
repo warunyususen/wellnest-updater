@@ -399,18 +399,23 @@
   }
 
   // อ่านรายชื่อไฟล์ทั้งหมดใน Storage (อ่านล้วน — list() ไม่แก้ไข/ลบข้อมูล)
+  // ส่งกลับเป็น "string เดียวคั่นด้วยขึ้นบรรทัด" แทน array:
+  // สั้นกว่า (ไม่มี quote/comma ต่อไฟล์) → ลดโอกาส response ยาวเกินจน BLE หลุด/timeout
+  // (เคยเจอ list ยาว ~58 ไฟล์อ่านไม่สำเร็จเป็นครั้งคราวบนสัญญาณ BLE ที่ไม่นิ่ง)
   var READ_FILES_EXPR =
-    "(function(){try{return require('Storage').list()}catch(e){return null}})()";
+    "(function(){try{return require('Storage').list().join('\\n')}catch(e){return null}})()";
 
   function doReadFiles(){
     setStatus("กำลังอ่านรายการไฟล์จากสายรัด…", "busy");
     UART.eval(READ_FILES_EXPR, function(data){
-      if(!Array.isArray(data)){
+      if(typeof data !== "string"){
         setStatus("อ่านรายการไฟล์ไม่สำเร็จ — ลองกดอีกครั้ง", "err");
         return;
       }
-      renderFiles(data);
-      setStatus("อ่านรายการไฟล์สำเร็จ ✓ (" + data.length + " ไฟล์)", "ok");
+      // แปลง string (คั่น \n) กลับเป็น array + กรองบรรทัดว่างออก (เผื่อ storage ว่าง = "")
+      var files = data.split("\n").filter(function(s){ return s.length > 0; });
+      renderFiles(files);
+      setStatus("อ่านรายการไฟล์สำเร็จ ✓ (" + files.length + " ไฟล์)", "ok");
     });
   }
 
