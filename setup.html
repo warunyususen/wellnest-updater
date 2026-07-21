@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WellNest+ · ตั้งเวลาสายรัด</title>
+<!-- UART.js: ไลบรารีทางการของ Espruino สำหรับเชื่อม Bangle.js ผ่าน Web Bluetooth (reuse ชุดเดียวกับ index.html/tools.html) -->
+<script src="https://www.espruino.com/js/uart.js"></script>
+<style>
+  /* ---------- Design tokens (WellNest+) — คัดลอกให้ตรงกับ index.html/tools.html เป๊ะ ---------- */
+  :root{
+    --ink:#14181f;         /* ตัวอักษรหลัก */
+    --muted:#6b7480;       /* ตัวอักษรรอง */
+    --line:#dfe6ee;        /* เส้นคั่น */
+    --bg:#f5f8fc;          /* พื้นหลัง (ฟ้าอ่อน) */
+    --panel:#ffffff;
+    --yellow:#f2c21e;      /* เหลืองแบรนด์ */
+    --blue:#1b62a6;        /* น้ำเงินแบรนด์ */
+    --blue-ink:#0f3d6b;
+    --ok:#1a7f4b;
+    --warn:#b23b2e;
+    --radius:14px;
+    /* ฟอนต์ monospace สำหรับตัวเลขเวลา/ค่าที่อ่านกลับ (ให้ตรงกับ tools.html) */
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg);
+    color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans Thai",sans-serif;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    display:flex;justify-content:center;
+    padding:28px 18px 60px;
+  }
+  .wrap{width:100%;max-width:440px}
+
+  /* ---------- Header ---------- */
+  .eyebrow{
+    font-size:12px;letter-spacing:.22em;text-transform:uppercase;
+    color:var(--blue);font-weight:700;margin:0 0 6px;
+  }
+  h1{font-size:26px;line-height:1.2;margin:0 0 4px;letter-spacing:-.01em}
+  .sub{color:var(--muted);font-size:14px;margin:0 0 16px}
+
+  /* ---------- ป้าย WRITE (signature ของหน้านี้: สื่อว่า "เขียน" แต่เฉพาะเวลา) ---------- */
+  .wr-badge{
+    display:inline-flex;align-items:center;gap:8px;
+    background:#fdf3e2;color:#8a5a12;border:1px solid #f0d9a8;
+    font-size:12.5px;font-weight:700;letter-spacing:.02em;
+    padding:8px 12px;border-radius:999px;margin-bottom:22px;
+  }
+  .wr-badge .wico{width:8px;height:8px;border-radius:50%;background:var(--yellow);flex:0 0 8px}
+
+  /* ---------- นาฬิกาตัวอย่าง (เวลาที่จะตั้ง) ---------- */
+  .clock-stage{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:24px;text-align:center;margin-bottom:18px;
+  }
+  .clock-label{font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted);margin:0 0 10px}
+  .clock-time{font-family:var(--mono);font-size:44px;font-weight:700;line-height:1;color:var(--blue-ink);letter-spacing:.01em}
+  .clock-date{font-size:14.5px;color:var(--ink);margin-top:12px}
+  .clock-tz{font-size:12.5px;color:var(--muted);margin-top:4px}
+
+  /* ---------- ปุ่ม + steps (reuse จาก index.html) ---------- */
+  .steps{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:18px;margin-bottom:16px;
+  }
+  .step{display:flex;gap:12px;align-items:flex-start;padding:10px 0}
+  .step + .step{border-top:1px solid var(--line)}
+  .num{
+    flex:0 0 26px;height:26px;border-radius:50%;background:var(--blue);color:#fff;
+    font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:2px;
+  }
+  .step-body{flex:1}
+  .step-body .label{font-weight:600;margin:0 0 8px;font-size:15px}
+
+  button{
+    font:inherit;font-weight:600;cursor:pointer;border-radius:10px;border:1px solid transparent;
+    padding:12px 16px;width:100%;transition:transform .05s ease, background .15s ease, opacity .15s;
+  }
+  button:active{transform:translateY(1px)}
+  button:focus-visible{outline:3px solid #9ec3ea;outline-offset:2px}
+  .btn-primary{background:var(--blue);color:#fff}
+  .btn-primary:hover{background:var(--blue-ink)}
+  .btn-accent{background:var(--yellow);color:#3a2e00}
+  .btn-accent:hover{background:#e0b012}
+  .btn-ghost{background:#fff;color:var(--blue);border-color:var(--line)}
+  .btn-ghost:hover{background:#f2f7fd}
+  button:disabled{opacity:.45;cursor:not-allowed}
+
+  /* ---------- Status (reuse จาก index.html) ---------- */
+  .status{
+    display:flex;align-items:center;gap:9px;font-size:14px;color:var(--muted);
+    padding:12px 14px;background:var(--panel);border:1px solid var(--line);border-radius:10px;margin-bottom:16px;
+    min-height:46px;
+  }
+  .dot{width:9px;height:9px;border-radius:50%;background:#c3ccd6;flex:0 0 9px}
+  .status.ok .dot{background:var(--ok)} .status.ok{color:var(--ok)}
+  .status.err .dot{background:var(--warn)} .status.err{color:var(--warn)}
+  .status.busy .dot{background:var(--yellow)}
+
+  /* ---------- การ์ดผลลัพธ์ (เวลาที่อ่านกลับจากเครื่อง) ---------- */
+  .card{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);
+    padding:6px 18px;margin-bottom:16px;
+  }
+  .card.empty{color:var(--muted);font-size:14px;padding:18px;text-align:center}
+  .row{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:13px 0}
+  .row .k{color:var(--muted);font-size:13.5px;flex:0 0 auto}
+  .row .v{font-weight:600;font-size:14px;text-align:right;word-break:break-all;font-family:var(--mono)}
+
+  .note{font-size:12.5px;color:var(--muted);border-top:1px solid var(--line);padding-top:14px}
+  .note b{color:var(--ink)}
+  code{background:#eef3f8;padding:1px 5px;border-radius:5px;font-size:12px}
+
+  @media (prefers-reduced-motion:reduce){button{transition:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="eyebrow">WellNest+ · ตั้งค่าเครื่อง</p>
+  <h1>ตั้งเวลาบนสายรัด</h1>
+  <p class="sub">ตั้งวันเวลาของสายรัดให้ตรงกับปัจจุบัน + โซนเวลาไทย (GMT+7) — ใช้ผ่าน Google Chrome / Edge บน Mac, Windows หรือ Android</p>
+
+  <!-- signature: ป้ายบอกชัดว่าหน้านี้ "เขียน" แต่แก้เฉพาะเวลา ไม่แตะไฟล์ -->
+  <span class="wr-badge"><span class="wico"></span>เขียนลงสายรัด · แก้เฉพาะ “เวลา” ไม่แตะไฟล์/ข้อมูลอื่น</span>
+
+  <!-- นาฬิกาตัวอย่าง: เวลาที่จะตั้ง (อัปเดตทุกวินาที เป็นเวลาไทย GMT+7) -->
+  <div class="clock-stage">
+    <p class="clock-label">เวลาที่จะตั้งลงสายรัด</p>
+    <div class="clock-time" id="clkTime">--:--:--</div>
+    <div class="clock-date" id="clkDate">—</div>
+    <div class="clock-tz">โซนเวลาไทย · GMT+7 (Asia/Bangkok)</div>
+  </div>
+
+  <!-- ลำดับการใช้งาน: เชื่อมต่อ → ตั้งเวลา -->
+  <div class="steps">
+    <div class="step">
+      <div class="num">1</div>
+      <div class="step-body">
+        <p class="label">เชื่อมต่อสายรัด</p>
+        <button class="btn-primary" id="btnConnect">เชื่อมต่อสายรัด</button>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">2</div>
+      <div class="step-body">
+        <p class="label">ตั้งเวลา (เขียนลงสายรัด)</p>
+        <button class="btn-accent" id="btnSet" disabled>ตั้งเวลาบนสายรัด</button>
+      </div>
+    </div>
+    <div class="step">
+      <div class="num">✓</div>
+      <div class="step-body">
+        <p class="label">ตรวจสอบเวลาบนเครื่อง (อ่านอย่างเดียว)</p>
+        <button class="btn-ghost" id="btnReadTime" disabled>อ่านเวลาปัจจุบันบนเครื่อง</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="status" id="status"><span class="dot"></span><span id="statusText">ยังไม่ได้เชื่อมต่อ</span></div>
+
+  <!-- ผลลัพธ์: เวลาที่อ่านกลับจากเครื่อง (เริ่มเป็นสถานะว่าง) -->
+  <div class="card empty" id="devTime">ยังไม่ได้อ่านเวลาจากเครื่อง — กด “อ่านเวลาปัจจุบันบนเครื่อง” เพื่อตรวจสอบ</div>
+
+  <button class="btn-ghost" id="btnBack" style="margin-bottom:10px">ไปหน้าอัปเดตแบรนด์ (WellNest+ Updater)</button>
+  <button class="btn-ghost" id="btnTools" style="margin-bottom:16px">ไปหน้าอ่านข้อมูลเครื่อง (Device Info)</button>
+
+  <p class="note">
+    <b>ต้องใช้:</b> เปิด Bluetooth + Google Chrome / Edge (Mac, Windows, Android)
+    · <b>ใช้ไม่ได้บน iPhone/iPad</b> (Safari และ Chrome บน iOS ไม่รองรับ Web Bluetooth)
+    · หน้านี้ต้องเปิดผ่าน <code>https://</code> หรือ <code>localhost</code>
+    · การตั้งเวลาแก้แค่นาฬิกาของเครื่อง — <b>ไม่ลบไฟล์/แอป/ข้อมูลสุขภาพ</b> · ตั้งซ้ำใหม่ได้ทุกเมื่อ
+  </p>
+
+</div>
+
+<script>
+  // ============================================================
+  // WellNest+ — Set Time (WRITE feature)
+  // แยกไฟล์จาก tools.html โดยตั้งใจ: tools.html "อ่านอย่างเดียว"
+  // ส่วนไฟล์นี้มีคำสั่ง "เขียน" 1 อย่างเท่านั้น = ตั้งเวลา (setTime + setTimeZone)
+  // แยกฟังก์ชัน "เขียน" (buildTimePayload) กับ "อ่าน" (READ_TIME_EXPR) ให้ชัดเจน
+  // ============================================================
+
+  var $ = function(id){ return document.getElementById(id); };
+
+  // ---------- helper: ป้องกัน XSS ก่อน render ค่าที่อ่านกลับจากเครื่องด้วย innerHTML ----------
+  function sanitizeHTML(v){
+    return String(v == null ? "" : v)
+      .replace(/&/g,"&amp;")
+      .replace(/</g,"&lt;")
+      .replace(/>/g,"&gt;")
+      .replace(/"/g,"&quot;")
+      .replace(/'/g,"&#39;");
+  }
+
+  // ---------- helper: อัปเดตแถบสถานะ (reuse pattern จาก index.html) ----------
+  function setStatus(text, kind){
+    var s = $("status");
+    s.className = "status" + (kind ? " " + kind : "");
+    $("statusText").textContent = text;
+  }
+
+  // ============================================================
+  // ▼ นาฬิกาตัวอย่าง (preview) — แสดง "เวลาที่จะตั้ง" เป็นเวลาไทย GMT+7 แบบ live
+  //   คำนวณจาก Date.now() (UTC) แล้วเลื่อน +7 ชม. เพื่อให้ตรงกับที่สายรัดจะแสดง
+  // ============================================================
+  var TH_DAY = ["อาทิตย์","จันทร์","อังคาร","พุธ","พฤหัสบดี","ศุกร์","เสาร์"];
+  var TH_MON = ["ม.ค.","ก.พ.","มี.ค.","เม.ย.","พ.ค.","มิ.ย.","ก.ค.","ส.ค.","ก.ย.","ต.ค.","พ.ย.","ธ.ค."];
+
+  function pad2(n){ return (n < 10 ? "0" : "") + n; }
+
+  // แปลง ms(UTC) เป็นชิ้นส่วนเวลาไทย: เลื่อน +7 ชม. แล้วอ่านด้วย getUTC* (เลี่ยง timezone ของ browser)
+  function bkkParts(ms){
+    var d = new Date(ms + 7 * 3600 * 1000);
+    return {
+      y:  d.getUTCFullYear(), mo: d.getUTCMonth(),  day: d.getUTCDate(),
+      h:  d.getUTCHours(),    mi: d.getUTCMinutes(), s:   d.getUTCSeconds(),
+      dow:d.getUTCDay()
+    };
+  }
+
+  function updateClock(){
+    var p = bkkParts(Date.now());
+    $("clkTime").textContent = pad2(p.h) + ":" + pad2(p.mi) + ":" + pad2(p.s);
+    $("clkDate").textContent = "วัน" + TH_DAY[p.dow] + "ที่ " + p.day + " " + TH_MON[p.mo] + " " + p.y;
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  // ============================================================
+  // ▼▼▼ WRITE — คำสั่งเขียนเดียวของหน้านี้: ตั้งเวลา ▼▼▼
+  //   setTime(<วินาที>) รับ "วินาที" (ไม่ใช่ ms) → ต้อง /1000 ก่อนเสมอ
+  //   E.setTimeZone(7) = ไทย GMT+7 (คุมเฉพาะการ "แสดงผล" ไม่กระทบค่าเวลาจริง)
+  //   คำนวณ Date.now() ตอน "กดปุ่ม" แล้วฝังเป็นค่าคงที่ในคำสั่ง (กันเวลาเพี้ยนระหว่างส่ง)
+  // ============================================================
+  function buildTimePayload(){
+    var secs = Math.round(Date.now() / 1000);   // UTC epoch วินาที (ค่าคงที่ ณ ตอนกด)
+    // \x10 = สั่งไม่ให้ REPL echo กลับ, ปิดท้าย \n เพื่อ execute (pattern เดียวกับ index.html)
+    return "\x10setTime(" + secs + ");E.setTimeZone(7);\n";
+  }
+  // ▲▲▲ จบส่วน WRITE ▲▲▲
+
+  // ---------- ส่งคำสั่งเขียนเข้าสายรัด (auto-connect ถ้ายังไม่ต่อ) — pattern จาก index.html ----------
+  function send(payload, okText, after){
+    var c = UART.getConnection();
+    if(c){
+      c.write(payload);
+      setStatus(okText, "ok");
+      if(after) after();
+    }else{
+      setStatus("กำลังเชื่อมต่อ…", "busy");
+      UART.connect(function(cc){
+        if(cc){ onConnected(cc); cc.write(payload); setStatus(okText, "ok"); if(after) after(); }
+        else{ setStatus("เชื่อมต่อไม่สำเร็จ — ลองใหม่", "err"); }
+      });
+    }
+  }
+
+  // ============================================================
+  // ▼ READ — อ่านเวลาปัจจุบันบนเครื่อง (อ่านล้วน เพื่อ verify ว่าตั้งสำเร็จ)
+  //   (new Date()).toString() บน Bangle คืนค่าเช่น "Tue Jul 21 2026 08:30:00 GMT+0700"
+  //   → เห็นทั้งเวลา "และ" โซนเวลา ในบรรทัดเดียว ใช้ยืนยันผลได้ครบ
+  // ============================================================
+  var READ_TIME_EXPR =
+    "(function(){try{return (new Date()).toString()}catch(e){return null}})()";
+
+  function renderDeviceTime(str){
+    var box = $("devTime");
+    box.className = "card";                       // ปลดสถานะ empty
+    // ค่าจากเครื่องผ่าน sanitizeHTML() ก่อน render ด้วย innerHTML
+    box.innerHTML =
+      '<div class="row"><span class="k">เวลาบนเครื่องตอนนี้</span>' +
+      '<span class="v">' + sanitizeHTML(str) + '</span></div>';
+  }
+
+  function doReadTime(){
+    var c = UART.getConnection();
+    if(!c){ setStatus("ยังไม่ได้เชื่อมต่อ — กด “เชื่อมต่อสายรัด” ก่อน", "err"); return; }
+    setStatus("กำลังอ่านเวลาบนเครื่อง…", "busy");
+    UART.eval(READ_TIME_EXPR, function(data){
+      if(typeof data !== "string"){
+        setStatus("อ่านเวลาไม่สำเร็จ — ลองกดอีกครั้ง", "err");
+        return;
+      }
+      renderDeviceTime(data);
+      setStatus("อ่านเวลาบนเครื่องสำเร็จ ✓", "ok");
+    });
+  }
+  // ▲ จบส่วน READ ▲
+
+  // ---------- ผูก event เมื่อเชื่อมต่อสำเร็จ ----------
+  function onConnected(connection){
+    setStatus("เชื่อมต่อสายรัดแล้ว พร้อมตั้งเวลา", "ok");
+    $("btnSet").disabled = false;
+    $("btnReadTime").disabled = false;
+    connection.on("close", function(){
+      setStatus("การเชื่อมต่อหลุด — กด “เชื่อมต่อสายรัด” อีกครั้ง", "err");
+      $("btnSet").disabled = true;
+      $("btnReadTime").disabled = true;
+    });
+  }
+
+  // ---------- ตรวจว่าเบราว์เซอร์รองรับ Web Bluetooth ไหม ----------
+  if(!navigator.bluetooth){
+    setStatus("เบราว์เซอร์นี้ไม่รองรับ Web Bluetooth — โปรดใช้ Chrome/Edge บน Mac, Windows หรือ Android", "err");
+    $("btnConnect").disabled = true;
+  }
+
+  // ---------- ปุ่ม 1: เชื่อมต่อ ----------
+  $("btnConnect").addEventListener("click", function(){
+    setStatus("กำลังเชื่อมต่อ… เลือกสายรัด Bangle.js ในหน้าต่างที่ขึ้นมา", "busy");
+    UART.connect(function(connection){
+      if(!connection){
+        setStatus("เชื่อมต่อไม่สำเร็จ — ลองใหม่ และตรวจว่าเปิด Bluetooth แล้ว", "err");
+        return;
+      }
+      onConnected(connection);
+    });
+  });
+
+  // ---------- ปุ่ม 2: ตั้งเวลา (เขียน) → auto-verify ด้วยการอ่านกลับ ----------
+  $("btnSet").addEventListener("click", function(){
+    send(
+      buildTimePayload(),
+      "ส่งแล้ว — ตั้งเวลาสายรัดเป็นเวลาไทย (GMT+7) ✓ กำลังตรวจสอบ…",
+      function(){ setTimeout(doReadTime, 800); }   // รอเครื่องอัปเดต RTC แล้วอ่านยืนยัน
+    );
+  });
+
+  // ---------- ปุ่ม 3: อ่านเวลาบนเครื่อง (auto-connect ถ้ายังไม่ต่อ) ----------
+  $("btnReadTime").addEventListener("click", function(){
+    var c = UART.getConnection();
+    if(c){
+      doReadTime();
+    }else{
+      setStatus("กำลังเชื่อมต่อ…", "busy");
+      UART.connect(function(cc){
+        if(cc){ onConnected(cc); doReadTime(); }
+        else{ setStatus("เชื่อมต่อไม่สำเร็จ — ลองใหม่", "err"); }
+      });
+    }
+  });
+
+  // ---------- ปุ่มลิงก์ข้ามหน้า ----------
+  $("btnBack").addEventListener("click", function(){ window.location.href = "index.html"; });
+  $("btnTools").addEventListener("click", function(){ window.location.href = "tools.html"; });
+</script>
+</body>
+</html>
